@@ -6,10 +6,10 @@
   "main": "./deploy/index.html",
   "keywords": [],
   "dependencies": {
-    "express.io": "^1.1.13",
+    "express": "^4.13.1",
     "node-minify": "1.2.0",
     "phaser": "2.3.0",
-    "socket.io": "0.9.x"
+    "socket.io": "^1.3.6"
   },
   "repository": {
     "type": "git",
