@@ -15,8 +15,16 @@ app.get('/', function (req, res) {
 //I can touch this
 io.on('connection', function(socket) {
 	//Add event handlers and emitters here. This is where it get cray
+	//Thes socket parameter is the specific connection.
+	//io is the whole server
 	console.log('Someone is here');
 	socket.emit('connected', {data: "So proud of you"});
+	socket.on('gameLoad', function(obj) {
+		console.log(obj.data);
+	});
+	socket.on('update', function(obj) {
+		console.log(obj);
+	});
 });
 
 http.listen(1337, function() {
