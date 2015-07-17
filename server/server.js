@@ -6,10 +6,13 @@ var app = express();
 var http = require('http').Server(app);
 var io = require('socket.io')(http);
 
+//Add requirements
+var serverUpdate = require('./update.js');
+
 //Serves the index.html and allows for the necessary client serving.
-app.use('/', express.static(__dirname + '/'));
-app.get('/', function (req, res) {
-	res.sendFile(__dirname + '/index.html');
+app.use(express.static(__dirname + '/../build'));
+app.get(__dirname+'../build', function (req, res) {
+	res.sendFile(__dirname + '/build/index.html');
 });
 
 //I can touch this
@@ -19,11 +22,8 @@ io.on('connection', function(socket) {
 	//io is the whole server
 	console.log('Someone is here');
 	socket.emit('connected', {data: "So proud of you"});
-	socket.on('gameLoad', function(obj) {
-		console.log(obj.data);
-	});
-	socket.on('update', function(obj) {
-		console.log(obj);
+	socket.on('serverUpdate', function(data) {
+		serverUpdate(socket, data);
 	});
 });
 
