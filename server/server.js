@@ -6,8 +6,6 @@ var app = express();
 var http = require('http').Server(app);
 var io = require('socket.io')(http);
 
-//Add requirements
-var serverUpdate = require('./update.js');
 
 //Serves the index.html and allows for the necessary client serving.
 app.use(express.static(__dirname + '/../build'));
@@ -20,11 +18,14 @@ io.on('connection', function(socket) {
 	//Add event handlers and emitters here. This is where it get cray
 	//Thes socket parameter is the specific connection.
 	//io is the whole server
-	console.log('Someone is here');
-	socket.emit('connected', {data: "So proud of you"});
+	console.log(socket.id);
+	socket.broadcast.emit('connected', {socketid: socket.id});
 	socket.on('serverUpdate', function(data) {
-		serverUpdate(socket, data);
+		socket.broadcast.emit('clientUpdate', data);
 	});
+	socket.on('disconnect', function() {
+		socket.broadcast.emit('userDisconnect', {socketid: socket.id});
+	})
 });
 
 http.listen(1337, function() {
