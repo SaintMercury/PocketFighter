@@ -8,8 +8,8 @@ Setting up dev environment
 --------------------------
 1. Clone the repo
 2. npm install
-2.1 npm install browserify -g
-3. It's done stop reading
+3. npm install browserify -g
+4. It's done stop reading
 
 'Compiling'
 --------------------------
