@@ -8,12 +8,13 @@ Setting up dev environment
 --------------------------
 1. Clone the repo
 2. npm install
+2.1 npm install browserify -g
 3. It's done stop reading
 
 'Compiling'
 --------------------------
 
-In your cmd/terminal, run 'node minifier.js'
+browserify ./client/client.js > ./build/clientBuild.js
 
 
 Developing/Testing
