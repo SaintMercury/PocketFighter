@@ -16,6 +16,12 @@ Setting up dev environment
 
 browserify ./client/client.js > ./build/clientBuild.js
 
+Running
+--------------------------
+
+node ./server/server.js
+In your browser navigate to localhost:1337
+
 
 Developing/Testing
 --------------------------
