@@ -24,11 +24,19 @@ function Room(id) {
 
 io.on('connection', function(socket) {
 	var myID = guid();
+	var roomID;
 	socket.emit('sendID', myID);
-	var roomID = joinHandler(socket, myID);
+	socket.on('IDConfirm', function(data) {
+		if(data === myID) {
+			roomID = joinHandler(socket, myID);
+		} else {
+			socket.emit('JoinError', 'ID confirmation failed');
+		}
+	});
 
 	//Game data event forwarder
 	socket.on('fetchGameData', function(data) {
+		socket.to(roomID).emit('newPlayer', data.id);
 		socket.to(roomID).emit('fetchGameData', data);
 	});
 	socket.on('recieveGameData', function(data) {
