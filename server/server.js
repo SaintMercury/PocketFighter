@@ -12,20 +12,29 @@ app.get(__dirname+'../build', function (req, res) {
 var waitingHosts = [];
 
 io.on('connection', function(socket) {
+	//Sets up 2 player rooms atm
 	console.log(socket.id);
 	socket.emit('obtainID', socket.id);
 	socket.on('ReadyForBrokerage', function() {
+		console.log('User successfully connected');
 		if(waitingHosts.length === 0) {
+			console.log('Host made and awaiting');
 			waitingHosts.push(socket);
+			socket.emit('Host');
 		} else {
-			waitingHosts.shift().emit('Client', socket.id);
+			console.log('Client made and forwarding to host');
+			socket.emit('Client', waitingHosts.shift().id);
 		}
 	});
-});
-
-http.on('connection', function(id) {
-	//do something?
-	console.log('peer connected');
+	socket.on('disconnect', function() {
+		console.log('User disconnected');
+		for(var i in waitingHosts) {
+			if(waitingHosts[i].id === socket.id) {
+				waitingHosts.splice(i, 1);
+				return;
+			}
+		}
+	});
 });
 
 http.listen(1337, function() {
