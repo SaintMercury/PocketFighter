@@ -2,92 +2,49 @@
 
 //Probably should not touch this. Was a pain to set up.
 var express = require('express');
+var peer = require('peer');
 var app = express();
 var http = require('http').Server(app);
-var io = require('socket.io')(http, {
-	pingTimeout: 10000,
-	pingInterval: 500
-});
+var peerServer = peer.ExpressPeerServer;
 
-//Serves the index.html and allows for the necessary client serving.
-app.use(express.static(__dirname + '/../build'));
+app.use(express.static(__dirname + '/../build'), peerServer(http));
 app.get(__dirname+'../build', function (req, res) {
 	res.sendFile(__dirname + '/build/index.html');
 });
 
+http.listen(9000, function() {
+	console.log('Running');
+});
+
 var rooms = [];
-function Room(id) {
-	this.id = id;
+var maxPlayers = 4;
+
+function Room() {
 	this.currentPlayers = [];
-	this.maxPlayers = 4;
 }
-
-io.on('connection', function(socket) {
-	var myID = guid();
-	var roomID;
-	socket.emit('sendID', myID);
-	socket.on('IDConfirm', function(data) {
-		if(data === myID) {
-			roomID = joinHandler(socket, myID);
-		} else {
-			socket.emit('JoinError', 'ID confirmation failed');
-		}
-	});
-
-	//Game data event forwarder
-	socket.on('fetchGameData', function(data) {
-		socket.to(roomID).emit('newPlayer', data.id);
-		socket.to(roomID).emit('fetchGameData', data);
-	});
-	socket.on('recieveGameData', function(data) {
-		socket.to(roomID).emit('recieveGameData', data);
-	});
-
-	//Host-Client Pseudo setup/forwarding system
-	socket.on('clientSend', function(data) {
-		socket.to(roomID).emit('hostRecieve', data);
-	});
-	socket.on('hostSend', function(data) {
-		socket.to(roomID).emit('clientRecieve', data);
-	});
+http.on('connection', function(peer) {
+	//Begin the crazies
+	joinHandler(peer);
 });
 
-http.listen(1337, function() {
-	console.log('Running...');
-});
-
-function joinHandler(socket, GUID) {
+function joinHandler(peer) {
 	if(rooms.length === 0) {
-		var newRoom = new Room(Date.now());
-		rooms.push(newRoom);
-		newRoom.currentPlayers.push('h'+GUID);
-		socket.emit('hostAssign', newRoom.id);
-		socket.join(newRoom.id);
-		return newRoom.id;
-	} else {
-		for(var i = 0; i < rooms.length; i++) {
-			if(rooms[i].currentPlayers.length < rooms[i].maxPlayers) {
-				rooms[i].currentPlayers.push(GUID);
-				socket.emit('clientAssign', rooms[i].id);
-				socket.join(rooms[i].id);
-				return rooms[i].id;
-			}
+		var room = new Room();
+		room.currentPlayers.push(peer);
+		rooms.push(room);
+		peer.host = true;
+		return;
+	}
+	for(var i = 0; i < rooms.length; i++) {
+		if(rooms[i].currentPlayers.length < maxPlayers) {
+			peer.host = false;
+			rooms[i].currentPlayers.push(peer);
+			return;
 		}
 	}
-	var newRoom = new Room(Date.now());
-	rooms.push(newRoom);
-	newRoom.currentPlayers.push('h'+GUID);
-	socket.emit('hostAssign', newRoom.id);
-	socket.join(newRoom.id);
-	return newRoom.id;
-}
-
-function guid() {
-  function s4() {
-    return Math.floor((1 + Math.random()) * 0x10000)
-      .toString(16)
-      .substring(1);
-  }
-  return s4() + s4() + '-' + s4() + '-' + s4() + '-' +
-    s4() + '-' + s4() + s4() + s4();
+	var room = new Room();
+	room.currentPlayers.push(peer);
+	rooms.push(room);
+	peer.host = true;
+	return;
 }
