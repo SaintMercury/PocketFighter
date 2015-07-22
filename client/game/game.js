@@ -1,3 +1,4 @@
+'use-strict';
 var socket = require('./socket.js');
 var controls = require('./controls/controls.js');
 
@@ -9,7 +10,7 @@ var connectee;
 var hostBool = true;
 var players;
 var self;
-var otherPlayer;
+var otherPlayer = undefined;
 var keys;
 
 var syncState = {
@@ -50,12 +51,15 @@ var gameState = {
 		game.load.image('pixel', '/Assets/Textures/pixel.png');
 	},
 	create: function() {
+		//Base game stuff
 		players = game.add.group();
 		self = players.create(game.world.randomX, game.world.randomY, 'pixel');
 		self.scale.setTo(20,20);
 		self.anchor.setTo(0.5,0.5);
 		self.tint = 0xff0000;
 		keys = game.input.keyboard.createCursorKeys();
+
+		//Online
 		if(hostBool === true) {
 			console.log('Assigning connection reciever');
 			peer.on('connection', function(conn) {
@@ -69,7 +73,7 @@ var gameState = {
 		}
 	},
 	update: function() {
-		if(!!otherPlayer != undefined && !!connectee != undefined) {
+		if(otherPlayer != undefined && connectee != undefined) {
 			connectee.send({type:'Update',x:self.x,y:self.y});
 		}
 		controls(self,keys);
