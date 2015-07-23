@@ -22,7 +22,7 @@ var syncState = {
 		socket.on('obtainID', function(data) {
 			console.log('ID obtained');
 			ID = data;
-			peer = new Peer(data, {host: 'localhost', port: 1337});
+			peer = new Peer(data, {host: '10.40.184.70', port: 1337});
 			peer.on('open', function(conn) {
 				console.log('Ready for match making');
 				socket.emit('ReadyForBrokerage');
@@ -31,6 +31,7 @@ var syncState = {
 
 		//Host
 		socket.on('Host', function() {
+			console.log(ID);
 			console.log('I am host');
 			game.state.start('game');
 		});
@@ -38,11 +39,17 @@ var syncState = {
 		//Client
 		socket.on('Client', function(data) {
 			console.log('I am client');
+			console.log(data);
 			hostBool = false;
 			host = peer.connect(data, {metadata: ID});
 			host.on('open', function() {
 				console.log('Connected to host');
-				game.state.start('game');
+				if(game.state.current === 'sync') {
+					game.state.start('game');
+				}
+				else {
+					game.state.restart();
+				}
 			});
 		});
 	}
@@ -95,7 +102,7 @@ var gameState = {
 			});
 			host.on('close', function() {
 				console.log('Lost connection to host');
-				location.reload(); //Reload page
+				socket.emit('ReadyForBrokerage');
 			});
 		}
 	},
