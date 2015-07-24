@@ -9,8 +9,13 @@ app.get(__dirname+'../build', function (req, res) {
 	res.sendFile(__dirname + '/build/index.html');
 });
 
-var waitingHosts = [];
-var maxPlayers = 4;
+var Rooms = {};
+var openRooms = [];
+function Room(host) {
+	this.id = host;
+	this.clients = [];
+}
+var maxPlayers = 3;
 
 io.on('connection', function(socket) {
 	//Sets up 2 player rooms atm
@@ -19,38 +24,76 @@ io.on('connection', function(socket) {
 
 	socket.on('ReadyForBrokerage', function() {
 		console.log('User successfully connected');
-		if(waitingHosts.length === 0) {
+		if(openRooms.length == 0) {
 			console.log('Host made and awaiting');
-			waitingHosts.push(socket);
-			socket.currentPlayers = 1;
+			//Create a new room, say has open slots, and register it in the room list
+			var newRoom = new Room(socket.id);
+			openRooms.push(newRoom);
+			Rooms[socket.id] = newRoom;
 			socket.emit('Host');
+			//Tag the socket
+			socket.host = true;
 		} else {
-			console.log('Client made and forwarding to host');
-			var host = waitingHosts[0];
-			if(host.currentPlayers < maxPlayers) {
+			var host = openRooms[0];
+			if(host.clients.length < maxPlayers) {
+				console.log('Client made and forwarding to host');
 				socket.emit('Client', host.id);
-				host.currentPlayers++;
-				if(host.currentPlayers >= maxPlayers) {
+				host.clients.push(socket.id);
+				if(host.clients.length >= maxPlayers) {
 					console.log('Room closed');
-					waitingHosts.shift();
+					openRooms.shift();
 				}
+			} else {
+				openRooms.shift();
+				console.log('Making new Room');
+				var newRoom = new Room(socket.id);
+				openRooms.push(newRoom);
+				Rooms[socket.id] = newRoom;
+				socket.emit('Host');
+				socket.host = true;
 			}
 		}
 	});
 
-	socket.on('PlayerLeft', function() {
-		waitingHosts.push(socket);
-		socket.currentPlayers--;
-		console.log(socket.currentPlayers);
+	socket.on('PlayerLeft', function(data) {
+		var flag = false;
+		for(var i = 0; i < openRooms.length; i++) {
+			if(openRooms[i].id === socket.id) {
+				flag = true;
+				break;
+			}
+		}
+		if(flag === false) {
+			openRooms.push(Rooms[socket.id]);
+		}
+		delete Rooms[socket.id].clients[data];
 	});
 
 	socket.on('disconnect', function() {
 		console.log('User disconnected');
-		for(var i in waitingHosts) {
-			if(waitingHosts[i].id === socket.id) {
-				console.log('Host room removed');
-				waitingHosts.splice(i, 1);
-				return;
+		if(socket.host === true) {
+			if(Rooms[socket.id].clients.length > 0) {
+				var room = Rooms[socket.id];
+				//Check if room is open
+				var flag = false;
+				for(var i in openRooms) {
+					if(openRooms[i].id === socket.id) {
+						flag = true;
+						break;
+					}
+				}
+				if(flag === false) {
+					openRooms.push(Rooms[socket.id]);
+				}
+			} else {
+				//Get the room outta hya
+				delete Rooms[socket.id];
+				for(var i in openRooms) {
+					if(openRooms[i].id === socket.id) {
+						openRooms.splice(i,1);
+						break;
+					}
+				}
 			}
 		}
 	});

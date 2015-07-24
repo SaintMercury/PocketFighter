@@ -22,7 +22,7 @@ var syncState = {
 		socket.on('obtainID', function(data) {
 			console.log('ID obtained');
 			ID = data;
-			peer = new Peer(data, {host: '10.40.184.70', port: 1337});
+			peer = new Peer(data, {host: '10.40.184.52', port: 1337});
 			peer.on('open', function(conn) {
 				console.log('Ready for match making');
 				socket.emit('ReadyForBrokerage');
@@ -59,14 +59,18 @@ var gameState = {
 	preload: function() {
 		console.log('GAME');
 		game.load.image('pixel', '/Assets/Textures/pixel.png');
+		game.physics.startSystem(Phaser.Physics.ARCADE);
 	},
 	create: function() {
 		//Base game stuff
 		players = game.add.group();
+		players.enableBody = true;
 		self = players.create(game.world.randomX, game.world.randomY, 'pixel');
 		self.scale.setTo(20,20);
 		self.anchor.setTo(0.5,0.5);
 		self.tint = 0xff0000;
+		game.physics.arcade.enable(self);
+		self.body.collideWorldBounds = true;
 		keys = game.input.keyboard.createCursorKeys();
 
 		//Online
@@ -89,7 +93,7 @@ var gameState = {
 						connections[i].send({type: 'PlayerLeave', id: conn.metadata});
 					}
 					console.log('0-2 leave events');
-					socket.emit('PlayerLeft');
+					socket.emit('PlayerLeft', conn.metadata);
 				});
 
 				console.log(conn.metadata);
@@ -115,6 +119,7 @@ var gameState = {
 		} else {
 			host.send({type: 'Update', id: ID, x: self.x, y: self.y});
 		}
+		game.physics.arcade.collide(players, players);
 		controls(self,keys);
 	}
 };
@@ -122,7 +127,7 @@ var gameState = {
 function eventMultiplexor(data, conn) {
 	switch(data.type) {
 		case 'NewJoin':
-			newJoinHendler(data, otherPlayers, players, 'pixel', connections, hostBool, ID);
+			newJoinHendler(data, otherPlayers, players, 'pixel', connections, hostBool, ID, game);
 			if(hostBool === true) {
 				var data = getInstance();
 				data.type = 'GetInstance';
