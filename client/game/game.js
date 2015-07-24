@@ -6,54 +6,12 @@ var newJoinHendler = require('./newJoinHandler.js');
 
 var game = new Phaser.Game(800, 600, Phaser.Auto, '');
 
-var ID;
-var peer;
-var connections = {}; //For the host
-var host; //For clients
-var hostBool = true;
-var players;
 var self;
 var otherPlayers = {};
+var activeBullets;
+var drops;
 var keys; //Controls
-
-var syncState = {
-	preload: function() {
-		console.log('SYNC');
-		socket.on('obtainID', function(data) {
-			console.log('ID obtained');
-			ID = data;
-			peer = new Peer(data, {host: '10.40.184.52', port: 1337});
-			peer.on('open', function(conn) {
-				console.log('Ready for match making');
-				socket.emit('ReadyForBrokerage');
-			});
-		});
-
-		//Host
-		socket.on('Host', function() {
-			console.log(ID);
-			console.log('I am host');
-			game.state.start('game');
-		});
-
-		//Client
-		socket.on('Client', function(data) {
-			console.log('I am client');
-			console.log(data);
-			hostBool = false;
-			host = peer.connect(data, {metadata: ID});
-			host.on('open', function() {
-				console.log('Connected to host');
-				if(game.state.current === 'sync') {
-					game.state.start('game');
-				}
-				else {
-					game.state.restart();
-				}
-			});
-		});
-	}
-};
+var actions;
 
 var gameState = {
 	preload: function() {
@@ -63,6 +21,8 @@ var gameState = {
 	},
 	create: function() {
 		//Base game stuff
+		activeBullets = game.add.group();
+		drops = game.add.group();
 		players = game.add.group();
 		players.enableBody = true;
 		self = players.create(game.world.randomX, game.world.randomY, 'pixel');
@@ -72,107 +32,76 @@ var gameState = {
 		game.physics.arcade.enable(self);
 		self.body.collideWorldBounds = true;
 		keys = game.input.keyboard.createCursorKeys();
-
-		//Online
-		if(hostBool === true) {
-			console.log('Assigning connection reciever');
-			peer.on('connection', function(conn) {
-				console.log('Peer connected to me');
-
-				conn.on('data', function(data) {
-					eventMultiplexor(data, conn);
-				});
-
-				conn.on('close', function() {
-					otherPlayers[conn.metadata].destroy();
-					delete otherPlayers[conn.metadata];
-					delete connections[conn.metadata];
-					console.log(connections);
-					for(var i in connections) {
-						console.log('Leave event sent');
-						connections[i].send({type: 'PlayerLeave', id: conn.metadata});
-					}
-					console.log('0-2 leave events');
-					socket.emit('PlayerLeft', conn.metadata);
-				});
-
-				console.log(conn.metadata);
-				connections[conn.metadata] = conn;
-			});
-		} else {
-			host.send({type:'NewJoin',id:ID,x:self.x,y:self.y});
-			host.on('data', function(data) {
-				eventMultiplexor(data, host);
-			});
-			host.on('close', function() {
-				console.log('Lost connection to host');
-				socket.emit('ReadyForBrokerage');
-			});
-		}
+		actions = game.input.keyboard.addKeys({'dodge': Phaser.Keyboard.C, 'shoot': Phaser.Keyboard.Z, 'slash': Phaser.Keyboard.X, 'strafe': Phaser.Keyboard.SPACEBAR});
+		self.animating = false;
+		self.Dodge = Dodge;
+		self.Shoot = Shoot;
+		self.ammo = 6;
+		self.Slash = Slash;
 	},
 	update: function() {
-		if(hostBool === true) {
-			var dataPackage = getInstance();
-			for(var i in connections) {
-				connections[i].send(dataPackage);
-			}
-		} else {
-			host.send({type: 'Update', id: ID, x: self.x, y: self.y});
-		}
 		game.physics.arcade.collide(players, players);
-		controls(self,keys);
+		if(self.animating === false) {
+			controls(self,keys,actions);
+		}
 	}
 };
 
-function eventMultiplexor(data, conn) {
-	switch(data.type) {
-		case 'NewJoin':
-			newJoinHendler(data, otherPlayers, players, 'pixel', connections, hostBool, ID, game);
-			if(hostBool === true) {
-				var data = getInstance();
-				data.type = 'GetInstance';
-				conn.send(data);
-				console.log(connections);
-			}
-			console.log(otherPlayers);
-			break;
-		case 'Update':
-			updateHandler(data, otherPlayers, hostBool);
-			break;
-		case 'GetInstance':
-			console.log('Got the game data');
-			for(var i in data) {
-				if(i !== 'type') {
-					if(data[i].id !== ID) {
-						otherPlayers[i] = players.create(data[i].x, data[i].y, 'pixel');
-						var newGuy = otherPlayers[i];
-						newGuy.scale.setTo(20,20);
-						newGuy.anchor.setTo(0.5,0.5);
-						newGuy.tint = 0x00ff00;
-					}
-				}
-			}
-			break;
-		case 'PlayerLeave':
-			console.log('Player left the game');
-			console.log(data.id);
-			otherPlayers[data.id].destroy();
-			delete otherPlayers[data.id];
-			break;
-	}
+function Dodge(directionX, directionY) {
+	this.animating = true;
+	var z = 0;
+	var _this = this;
+	//Play animation
+	var interval = setInterval(function() {
+		//Give a sense of dynamic momentum
+		_this.body.velocity.x = (-400*(z/20) + 250) * directionX;
+		_this.body.velocity.y = (-400*(z/20) + 250) * directionY;
+		z++;
+		if(z >= 10) {
+			clearInterval(interval);
+			_this.animating = false;
+		}
+	}, 50);
 }
 
-function getInstance() {
-	var dataPackage = {};
-	for(var i in otherPlayers) {
-		dataPackage[i] = {id: i, x: otherPlayers[i].x, y: otherPlayers[i].y};
-	}
-	dataPackage[ID] = {id: ID, x: self.x, y: self.y};
-	dataPackage.type = 'Update';
-	return dataPackage;
+function Slash(directionX, directionY) {
+	this.animating = true;
+	this.body.velocity.x = 0;
+	this.body.velocity.y = 0;
+	var x = this.x;
+	var y = this.y;
+	var knife = game.add.sprite(x, y,'pixel');
+	knife.scale.setTo(30, 3);
+	knife.tint = 0xa0a0a0;
+	knife.angle = Math.atan(directionY/directionX)*180/Math.PI - 52;
+	knife.angle = (directionX < 0 ? knife.angle += 180 : knife.angle);
+	var z = 0;
+	var _this = this;
+	var interval = setInterval(function() {
+		knife.angle += 10;
+		z++;
+		if(z >= 11) {
+			knife.destroy();
+			_this.animating = false;
+			clearInterval(interval);
+		}
+	}, 25);
 }
 
-game.state.add('sync', syncState, true);
-game.state.add('game', gameState, false);
+function Shoot(directionX, directionY) {
+	var x = directionX*15 + this.x;
+	var y = directionY*15 + this.y;
+	var newBullet = activeBullets.create(x, y, 'pixel');
+	game.physics.arcade.enable(newBullet);
+	newBullet.scale.setTo(10, 5);
+	newBullet.anchor.setTo(0.5, 0.5);
+	newBullet.tint = 0xffd700;
+	newBullet.angle = Math.atan(directionY / directionX)*180/Math.PI;
+	newBullet.body.velocity.x = directionX*500;
+	newBullet.body.velocity.y = directionY*500;
+	setTimeout(function() {newBullet.destroy()}, 1500);
+}
+
+game.state.add('game', gameState, true);
 
 module.exports = game;
