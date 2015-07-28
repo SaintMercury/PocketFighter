@@ -1,56 +1,38 @@
 'use-strict';
 var socket = require('./socket.js');
 var controls = require('./controls/controls.js');
-var updateHandler = require('./updateHandler.js');
-var newJoinHendler = require('./newJoinHandler.js');
 
 var game = new Phaser.Game(800, 600, Phaser.Auto, '');
 
-var ID;
 var peer;
-var connections = {}; //For the host
-var host; //For clients
-var hostBool = true;
-var players;
+var hostBool;
+var ID;
+var otherPlayersAvatars;
 var self;
-var otherPlayers = {};
-var keys; //Controls
+var otherPlayersData = []; //Connection to other clients
+var host; //Connection to host
 
 var syncState = {
 	preload: function() {
 		console.log('SYNC');
 		socket.on('obtainID', function(data) {
-			console.log('ID obtained');
+			peer = new Peer(data,{host: '/', port: 1337});
 			ID = data;
-			peer = new Peer(data, {host: '10.40.184.52', port: 1337});
-			peer.on('open', function(conn) {
-				console.log('Ready for match making');
-				socket.emit('ReadyForBrokerage');
-			});
+			console.log('ID obtained: ' + ID);
+			socket.emit('ReadyForBrokerage');
 		});
 
-		//Host
-		socket.on('Host', function() {
-			console.log(ID);
-			console.log('I am host');
+		socket.on('ClientAssign', function(data) {
+			console.log('CLIENT');
+			hostBool = false;
+			host = peer.connect(data, {metadata: ID});
 			game.state.start('game');
 		});
 
-		//Client
-		socket.on('Client', function(data) {
-			console.log('I am client');
-			console.log(data);
-			hostBool = false;
-			host = peer.connect(data, {metadata: ID});
-			host.on('open', function() {
-				console.log('Connected to host');
-				if(game.state.current === 'sync') {
-					game.state.start('game');
-				}
-				else {
-					game.state.restart();
-				}
-			});
+		socket.on('HostAssign', function() {
+			console.log('HOST');
+			hostBool = true;
+			game.state.start('game');
 		});
 	}
 };
@@ -58,121 +40,44 @@ var syncState = {
 var gameState = {
 	preload: function() {
 		console.log('GAME');
-		game.load.image('pixel', '/Assets/Textures/pixel.png');
-		game.physics.startSystem(Phaser.Physics.ARCADE);
+		game.load.image('pixel', 'Assets/Textures/pixel.png');
 	},
 	create: function() {
-		//Base game stuff
-		players = game.add.group();
-		players.enableBody = true;
-		self = players.create(game.world.randomX, game.world.randomY, 'pixel');
-		self.scale.setTo(20,20);
-		self.anchor.setTo(0.5,0.5);
-		self.tint = 0xff0000;
-		game.physics.arcade.enable(self);
-		self.body.collideWorldBounds = true;
-		keys = game.input.keyboard.createCursorKeys();
-
-		//Online
-		if(hostBool === true) {
-			console.log('Assigning connection reciever');
-			peer.on('connection', function(conn) {
-				console.log('Peer connected to me');
-
-				conn.on('data', function(data) {
-					eventMultiplexor(data, conn);
-				});
-
-				conn.on('close', function() {
-					otherPlayers[conn.metadata].destroy();
-					delete otherPlayers[conn.metadata];
-					delete connections[conn.metadata];
-					console.log(connections);
-					for(var i in connections) {
-						console.log('Leave event sent');
-						connections[i].send({type: 'PlayerLeave', id: conn.metadata});
-					}
-					console.log('0-2 leave events');
-					socket.emit('PlayerLeft', conn.metadata);
-				});
-
-				console.log(conn.metadata);
-				connections[conn.metadata] = conn;
+		//
+		if(hostBool === false) {
+			//Setup P2P connections - client
+			socket.on('HostPromotion', function() {
+				host.close();
+				delete host;
+				socket.emit('PromotionAccepted');
 			});
-		} else {
-			host.send({type:'NewJoin',id:ID,x:self.x,y:self.y});
-			host.on('data', function(data) {
-				eventMultiplexor(data, host);
-			});
-			host.on('close', function() {
-				console.log('Lost connection to host');
-				socket.emit('ReadyForBrokerage');
+
+			socket.on('NewHost', function(data) {
+				host.close();
+				delete host;
+				host = peer.connect(data, {metadata:ID});
+				//Setup P2P connections - client
 			});
 		}
+		//Every client will be able to become a host immediatly upon a disconnect. More loading initially,less later hopefully.
+		peer.on('connection', function(conn) {
+			//Setup P2P connections - host
+			conn.on('close', function() {
+				socket.emit('PlayerLeave', conn.metadata);
+			});
+		});
 	},
 	update: function() {
-		if(hostBool === true) {
-			var dataPackage = getInstance();
-			for(var i in connections) {
-				connections[i].send(dataPackage);
-			}
-		} else {
-			host.send({type: 'Update', id: ID, x: self.x, y: self.y});
-		}
-		game.physics.arcade.collide(players, players);
-		controls(self,keys);
+		//
 	}
 };
 
-function eventMultiplexor(data, conn) {
+function dataPlexor(data) {
 	switch(data.type) {
-		case 'NewJoin':
-			newJoinHendler(data, otherPlayers, players, 'pixel', connections, hostBool, ID, game);
-			if(hostBool === true) {
-				var data = getInstance();
-				data.type = 'GetInstance';
-				conn.send(data);
-				console.log(connections);
-			}
-			console.log(otherPlayers);
-			break;
-		case 'Update':
-			updateHandler(data, otherPlayers, hostBool);
-			break;
-		case 'GetInstance':
-			console.log('Got the game data');
-			for(var i in data) {
-				if(i !== 'type') {
-					if(data[i].id !== ID) {
-						otherPlayers[i] = players.create(data[i].x, data[i].y, 'pixel');
-						var newGuy = otherPlayers[i];
-						newGuy.scale.setTo(20,20);
-						newGuy.anchor.setTo(0.5,0.5);
-						newGuy.tint = 0x00ff00;
-					}
-				}
-			}
-			break;
-		case 'PlayerLeave':
-			console.log('Player left the game');
-			console.log(data.id);
-			otherPlayers[data.id].destroy();
-			delete otherPlayers[data.id];
-			break;
+		//
 	}
-}
-
-function getInstance() {
-	var dataPackage = {};
-	for(var i in otherPlayers) {
-		dataPackage[i] = {id: i, x: otherPlayers[i].x, y: otherPlayers[i].y};
-	}
-	dataPackage[ID] = {id: ID, x: self.x, y: self.y};
-	dataPackage.type = 'Update';
-	return dataPackage;
 }
 
 game.state.add('sync', syncState, true);
 game.state.add('game', gameState, false);
-
 module.exports = game;
