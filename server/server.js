@@ -11,97 +11,76 @@ app.get(__dirname+'../build', function (req, res) {
 
 var Rooms = {};
 var openRooms = [];
-function Room(hostID) {
-	this.host = hostID;
+function Room(startingPlayer) {
+	this.id = startingPlayer;
 	this.players = [];
 	this.open = true;
 }
-var maxPlayers = 3;
+var maxPlayers = 4;
 
 //Changeable
 io.on('connection', function(socket) {
-	//Sets up 2 player rooms atm
 	console.log(socket.id);
 	socket.emit('obtainID', socket.id);
+
 	socket.on('ReadyForBrokerage', function() {
+		console.log('Going to assign a room');
 		if(openRooms.length > 0) {
 			var room = openRooms[0];
+			socket.emit('RoomJoin', room.players);
+			socket.room = room.id;
 			room.players.push(socket.id);
-			socket.emit('ClientAssign', room.host);
 			if(room.players.length >= maxPlayers) {
 				openRooms.splice(0,1);
 				room.open = false;
 			}
 		} else {
 			var room = new Room(socket.id);
-			socket.emit('HostAssign');
+			socket.emit('RoomJoin');
+			socket.room = room.id;
+			room.players.push(socket.id);
 			openRooms.push(room);
-			Rooms[socket.id] = room;
-			socket.host = true;
+			Rooms[socket.room] = room;
 		}
 	});
 
-	//Host telling the server someone left.
-	socket.on('PlayerLeave', function(data) {
-		console.log('Someone left');
-		for(var i = 0; i < Rooms[socket.id].players.length; i++) {
-			if(Rooms[socket.id].players[i] === data) {
-				Rooms[socket.id].players.splice(i,1);
-				break;
-			}
-		}
-		if(Rooms[socket.id].open === false) {
-			openRooms.push(Rooms[socket.id]);
-			Rooms[socket.id].open = true;
-		}
-	});
-
-	socket.on('PromotionAccepted', function() {
-		console.log('Promoted: ' + socket.id);
-		socket.host = true;
-		if(Rooms[socket.id].players.length > 0) {
-			for(var i = 0; i < Rooms[socket.id].players.length; i++) {
-				console.log('Telling: ' + socket.id);
-				socket.to(Rooms[socket.id].players[i]).emit('NewHost', socket.id);
-			}
-		}
-	});
-
-	//
 	socket.on('disconnect', function() {
-		console.log('Someone left');
-		if(socket.host === true) {
-			console.log('Host left');
-			var room = Rooms[socket.id];
-			if(room.players.length > 0) {
-				var newHost = room.players.shift();
-				var newRoom = new Room(newHost);
-				newRoom.players = room.players;
-				openRooms.push(newRoom);
-				Rooms[newHost] = newRoom;
-				io.to(newHost).emit('HostPromotion');
-			}
-			if(room.open === true) {
-				console.log('Room is open');
-				for(var i = 0; i < openRooms.length; i++) {
-					if(openRooms[i].host === socket.id) {
-						console.log('Room removed');
-						openRooms.splice(i,1);
-						break;
+		console.log('Someone is leaving');
+		console.log(socket.room);
+		var room = Rooms[socket.room];
+		if(room !== undefined) {
+			for(var i = 0; i < room.players.length; i++) {
+				if(room.players[i] === socket.id) {
+					console.log('Pulled out player');
+					room.players.splice(i,1);
+					if(room.players.length === 0) {
+						console.log('Deleted room');
+						console.log(Rooms);
+						delete Rooms[socket.room];
+						console.log(Rooms);
+						if(room.open === true) {
+							for(var i = 0; i < openRooms.length; i++) {
+								if(openRooms[i].id === room.id) {
+									openRooms.splice(i,1);
+									break;
+								}
+							}
+						}
+					} else 
+					if(room.players.length === (maxPlayers - 1)){
+						console.log('Room liberated')
+						openRooms.push(Rooms[socket.room]);
+						Rooms[socket.room].open = true;
 					}
-					console.log('Not this one');
+					break;
 				}
 			}
-			delete Rooms[socket.id];
-		} else {
-			console.log('Player left');
 		}
 	});
 });
 //End Changeable
 
 http.on('connection', function() {
-	//console.log('Connection recieved');
 });
 
 http.listen(1337, function() {
