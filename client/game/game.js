@@ -6,8 +6,6 @@ var game = new Phaser.Game(800, 600, Phaser.Auto, '');
 
 //Network shtuff
 var peer;
-var authority = false;
-var successor = false;
 var ID;
 var connections = [];
 
@@ -19,6 +17,7 @@ var arrows;
 var buttons;
 
 var activeBullets;
+var droppedBullets;
 
 var syncState = {
 	preload: function() {
@@ -59,11 +58,14 @@ var gameState = {
 		self.strafing = false;
 		self.directionX = 1;
 		self.directionY = 1;
+		self.animating = false;
+		self.me = true;
 
 		arrows = game.input.keyboard.createCursorKeys();
 		buttons = game.input.keyboard.addKeys({'shoot':Phaser.Keyboard.Z,'slash':Phaser.Keyboard.X,'dodge':Phaser.Keyboard.C,'strafe':Phaser.Keyboard.SPACEBAR});
 
 		activeBullets = game.add.group();
+		droppedBullets = game.add.group();
 
 		socket.on('RoomJoin', function(data) {
 			console.log('Joined a room');
@@ -71,9 +73,6 @@ var gameState = {
 			//Check if I'm first join
 			peer.on('connection', function(conn) {
 				console.log(conn.metadata);
-				if(connections.length === 0) {
-					conn.successor = true;
-				}
 				connections.push(conn);
 				console.log('New guy');
 				conn.on('open', function() {
@@ -101,12 +100,10 @@ var gameState = {
 					});
 
 					conn.on('close', function() {
-						others[newPlayer.id].destroy();
+						others[conn.metadata].destroy();
 						for(var i = 0; i < connections.length; i++) {
 							if(connections[i].metadata === conn.metadata) {
-								if(connections.splice(i,1).successor === true) {
-									connections[0].successor = true;
-								}
+								connections.splice(i,1);
 								break;
 							}
 						}
@@ -119,7 +116,6 @@ var gameState = {
 				for(var i = 0; i < data.length; i++) {
 					console.log('Connecting...');
 					var conn = peer.connect(data[i], {metadata: ID});
-					//console.log(conn.metadata); //This is our ID
 					connections.push(conn);
 					conn.on('open', function() {
 						console.log('Joined');
@@ -134,30 +130,70 @@ var gameState = {
 							dataPlexor(data, conn);
 						});
 						conn.on('close', function() {
-							//Remove from connections and others
-							//Check to see if host left, and promote self to new authority
-							//alert another connection for successor
+							others[conn.metadata].destroy();
+							for(var i = 0; i < connections.length; i++) {
+								if(connections[i].metadata === conn.metadata) {
+									connections.splice(i,1);
+									console.log('Spliced out');
+									break;
+								}
+							}
 						});
 					});
 				}
-			} else {
-				//Fix stuff
-				authority = true;
 			}
 		});
-	socket.emit('ReadyForBrokerage');
-	setTimeout(function() {
-		enableControls = true;
-	}, 2000);
+
+		socket.emit('ReadyForBrokerage');
+		setTimeout(function() {
+			enableControls = true;
+			animating = false;
+		}, 2000);
 	},
 	update: function() {
-		if(enableControls === true) {
+		if(enableControls === true && animating === false) {
 			controls(self, arrows, buttons);
-			for(var i = 0; i < connections.length; i++) {
-				connections[i].send(currentInstance());
-			}
 		}
-		game.physics.arcade.collide(self,  players);
+		for(var i = 0; i < connections.length; i++) {
+			connections[i].send(currentInstance());
+		}
+		if(self.visible === true) {
+			game.physics.arcade.collide(self,  players);
+		}
+		game.physics.arcade.overlap(players, activeBullets, function(player, bullet) {
+			if(player.visible === true) {
+				player.visible = false;
+				player.x = 0;
+				player.y = 0;
+				bullet.destroy();
+				if(player.ammo > 0) {
+					console.log('Dropped: '+player.ammo);
+					var bullets = droppedBullets.create(player.x, player.y, 'pixel');
+					bullets.anchor.setTo(0.5,0.5);
+					bullets.scale.setTo(10, 5);
+					bullets.tint = 0xffd700;
+					bullets.amount = player.ammo;
+					setTimeout(function() {
+						console.log('Bye bye drops');
+						bullets.destroy();
+					}, 3000);
+				}
+				setTimeout(function() {
+					player.visible = true;
+					player.x = game.world.randomX;
+					player.y = game.world.randomY;
+					player.ammo = 6;
+					for(var i = 0; i < connections.length; i++) {
+						connections[i].send({
+							id: ID,
+							type: 'Respawn',
+							x: player.x,
+							y: player.y
+						});
+					}
+				}, 3000);
+			}
+		}, null, this);
 	}
 };
 
@@ -184,6 +220,7 @@ function dataPlexor(data, connection) {
 		break;
 		case 'InitialResponse':
 		console.log('InitialResponse');
+			connection.metadata = data.id;
 			var player = players.create(data.vector.x, data.vector.y, 'pixel');
 			player.scale.setTo(20,20);
 			player.anchor.setTo(0.5,0.5);
@@ -214,12 +251,24 @@ function dataPlexor(data, connection) {
 		break;
 		case 'Update':
 			var player = others[data.id];
-			if(authority === true) {
-				//Check correct values
-				//check ammo
-				//check position
+			//Align to correct position within a given error
+			var pos = {x: data.vector.x, y: data.vector.y};
+			var error = 2;
+			if(player.x > pos.x + error || player.x < pos.x - error) {
+				player.x = pos.x;
 			}
-			controls(player, data.keyboard, data.buttons);
+			if(player.y > pos.y + error || player.y < pos.y - error) {
+				player.y = pos.y;
+			}
+			if(data.animating === false) {
+				controls(player, data.keyboard, data.buttons);
+			}
+		break;
+		case 'Respawn':
+			var player = others[data.id];
+			player.visible = true;
+			player.x = data.x;
+			player.y = data.y;
 		break;
 	}
 }
@@ -231,8 +280,8 @@ function Dodge(directionX, directionY) {
 	//Play animation
 	var interval = setInterval(function() {
 		//Give a sense of dynamic momentum
-		_this.body.velocity.x = (-20*z + 275) * directionX;
-		_this.body.velocity.y = (-20*z + 275) * directionY;
+		_this.body.velocity.x = (-30*z + 500) * directionX;
+		_this.body.velocity.y = (-30*z + 500) * directionY;
 		z++;
 		if(z >= 10) {
 			clearInterval(interval);
@@ -268,8 +317,8 @@ function Slash(directionX, directionY) {
 }
 
 function Shoot(directionX, directionY) {
-	var x = directionX*15 + this.x;
-	var y = directionY*15 + this.y;
+	var x = directionX*25 + this.x;
+	var y = directionY*25 + this.y;
 	var newBullet = activeBullets.create(x, y, 'pixel');
 	game.physics.arcade.enable(newBullet);
 	newBullet.scale.setTo(10, 5);
@@ -303,12 +352,13 @@ function currentInstance() {
 		xVel: self.body.velocity.x,
 		yVel: self.body.velocity.y
 	};
+	data.animating = self.animating;
 	data.ammo = self.ammo;
 	return data;
 }
 
 function getRandomColor() {
-  var letters = '56789ABCDEF'.split('');
+  var letters = '456789ABCDEF'.split('');
   var color = '0x';
   for (var i = 0; i < 6; i++ ) {
     color += letters[Math.floor(Math.random() * letters.length)];
